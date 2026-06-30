@@ -49,23 +49,14 @@
     letter-spacing: 1px;
   }
 
-  #debugPanel label {
-    color: rgba(255,255,255,0.6);
-    font-size: 10px;
-  }
-
-  #debugPanel input[type="range"] {
-    width: 100%;
-  }
-
-  #debugPanel input[type="checkbox"] {
-    margin-right: 6px;
-  }
+  #debugPanel input[type="range"] { width: 100%; }
 
   #debugPanel .row {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 4px;
   }
 
   #debugPanel button {
@@ -158,15 +149,6 @@
     color: #9fd8ff;
   }
 
-  #standbyScreen .headline-ticker {
-    margin-top: 10px;
-    font-size: 15px;
-    color: rgba(255,255,255,0.55);
-    max-width: 70%;
-    text-align: center;
-    letter-spacing: 1px;
-  }
-
   /* ───────── LOWER THIRD / BUG ───────── */
   #lowerThird {
     position: absolute;
@@ -231,7 +213,6 @@
     <div class="net-id">NEWSNET 24 · OVERNIGHT</div>
     <div class="standby-time" id="standbyTime">--:--</div>
     <div class="standby-weather" id="standbyWeather">Loading weather...</div>
-    <div class="headline-ticker" id="standbyTicker">Loading headlines...</div>
   </div>
 
   <div id="channelBug">NEWSNET 24</div>
@@ -260,8 +241,10 @@
       <button onclick="jumpTo(7,0)">7AM</button>
       <button onclick="jumpTo(10,0)">10AM</button>
       <button onclick="jumpTo(12,0)">12PM</button>
+      <button onclick="jumpTo(16,0)">4PM</button>
       <button onclick="jumpTo(18,0)">6PM</button>
       <button onclick="jumpTo(21,0)">9PM</button>
+      <button onclick="jumpTo(0,30)">12:30AM</button>
       <button onclick="jumpTo(3,0)">3AM</button>
     </div>
     <div class="row" style="font-size:10px;color:rgba(255,255,255,0.4)">
@@ -273,64 +256,69 @@
 <script>
 /* ════════════════════════════════════════════
    CONFIG
+   No RSS. No proxy. No queue. Just direct embeds —
+   either a channel's live stream, or specific
+   uploaded videos you give me, slotted by time.
 ════════════════════════════════════════════ */
 const OWM_KEY = "69d758106d8333cb8e806b8d3bff6d15";
 const LAT = 30.5083, LON = -97.6789;
 
-const CHANNELS = {
-  KVUE: "UCxXTyFekH99JnS3qaXIQW7A",
-  BBC:  "UC16niRr50-MSBwiO3YDb3RA",
-  FOX7: "UC5maSolHQX9er0BOxrzjMwA"
+// Official 24/7 live news streams — these auto-update themselves on YouTube's end,
+// so there is nothing for you to maintain here.
+const LIVE_STREAMS = {
+  BBC:  "vtX1m5_wlzw",                 // BBC News Live (youtube.com/live/vtX1m5_wlzw)
+  FOX7: "live_stream?channel=UC5maSolHQX9er0BOxrzjMwA" // FOX 7 Austin channel live slot
 };
 
-// Which channels feed which slot types — round-robins across sources for reliability/volume
-const SLOT_SOURCES = {
-  kvue_replay:     ["KVUE", "FOX7"],
-  kvue_highlights: ["KVUE", "FOX7"],
-  kvue_live:       ["KVUE", "FOX7"],
-  kvue_extended:   ["KVUE", "FOX7"],
-  kvue_recap:      ["KVUE", "FOX7"],
-  kvue_late:       ["KVUE", "FOX7"],
-  evening_preview: ["KVUE", "FOX7"],
-  bbc:             ["BBC"]
-};
-
-const RSS_PROXY = "https://api.allorigins.win/raw?url=";
-
-// Ads / filler video (90s-style or generic ad reel) — reused as filler when no fresh video found
-const FILLER_AD_ID = "pQ2jtyVKWhc";
-
-// Music video pool reused from the 90s build for the music blocks
+// Music video pool for the music blocks
 const MUSIC_VIDEOS = [
   "sOnqjkJTMaA", "Zi_XLOBDo_Y", "YNzuiRuQNYY", "PIb6AZdTr-A",
   "t4QK8RxCAwo", "wp43OdtAAkM", "FTQbiNvZqaY", "SZQIfEN_p2A",
   "m3-hY-hlhBg", "xMaE6toi4mk"
 ];
 
+// Ads / filler video
+const FILLER_AD_ID = "pQ2jtyVKWhc";
+
+/* ════════════════════════════════════════════
+   YOUR SPECIFIC NEWSCAST VIDEOS
+   Paste exact video IDs here, mapped to the hour
+   they aired/should air. "today" plays today,
+   "tomorrow" auto-plays the next day at the same
+   time — so you only have to enter each video once
+   and it correctly repeats one day later.
+   Format: hour (0-23) -> YouTube video ID
+════════════════════════════════════════════ */
+const SCHEDULED_VIDEOS = {
+  // Hour : videoId  (24-hour clock)
+  7:  "MnD9mEuStTg",
+  9:  "j6OEL_s-r0I",
+  18: "WZXDND7-V9E"
+  // Add more hours here as you give me more links, e.g.:
+  // 8:  "xxxxxxxxxxx",
+  // 19: "xxxxxxxxxxx",
+};
+
 /* ════════════════════════════════════════════
    SCHEDULE DEFINITION
-   Each slot: { start: minutesFromMidnight, end, type, ... }
-   type: "kvue_replay" | "kvue_highlights" | "bbc" | "music" |
-         "evening_preview" | "kvue_live" | "kvue_extended" |
-         "kvue_recap" | "kvue_late" | "overnight_calm" | "offline"
 ════════════════════════════════════════════ */
 function M(h, m=0) { return h * 60 + m; }
 
 const SCHEDULE = [
-  { start: M(5),  end: M(7),  type: "bbc",              label: "BBC NATIONAL NEWS" },
-  { start: M(7),  end: M(9),  type: "kvue_replay",       label: "MORNING NEWS REPLAY" },
-  { start: M(9),  end: M(10), type: "kvue_highlights",   label: "MORNING HIGHLIGHTS LOOP" },
-  { start: M(10), end: M(12), type: "bbc",               label: "BBC NATIONAL NEWS" },
-  { start: M(12), end: M(16), type: "music",             label: "MUSIC VIDEOS" },
-  { start: M(16), end: M(18), type: "evening_preview",   label: "EVENING PREVIEW · WEATHER & TRAFFIC" },
-  { start: M(18), end: M(19), type: "kvue_live",         label: "KVUE EVENING NEWS" },
-  { start: M(19), end: M(20), type: "kvue_extended",     label: "KVUE EXTENDED COVERAGE" },
-  { start: M(20), end: M(21), type: "kvue_recap",        label: "NEWS RECAP" },
-  { start: M(21), end: M(22), type: "kvue_late",         label: "KVUE LATE NEWS" },
-  { start: M(22), end: M(24), type: "music",             label: "MUSIC VIDEOS" },
-  { start: M(0),  end: M(2),  type: "overnight_calm",    label: "OVERNIGHT · WEATHER & HEADLINES" },
-  { start: M(2),  end: M(3),  type: "overnight_calm",    label: "OVERNIGHT · WEATHER & HEADLINES" },
-  { start: M(3),  end: M(5),  type: "offline",           label: "OFF AIR" },
+  { start: M(5),  end: M(7),  type: "bbc_live",        label: "BBC NATIONAL NEWS · LIVE" },
+  { start: M(7),  end: M(9),  type: "scheduled_or_fox", label: "MORNING NEWS" },
+  { start: M(9),  end: M(10), type: "scheduled_or_fox", label: "MORNING HIGHLIGHTS" },
+  { start: M(10), end: M(12), type: "bbc_live",        label: "BBC NATIONAL NEWS · LIVE" },
+  { start: M(12), end: M(16), type: "music",           label: "MUSIC VIDEOS" },
+  { start: M(16), end: M(18), type: "scheduled_or_fox", label: "EVENING PREVIEW · WEATHER & TRAFFIC" },
+  { start: M(18), end: M(19), type: "scheduled_or_fox", label: "KVUE EVENING NEWS" },
+  { start: M(19), end: M(20), type: "scheduled_or_fox", label: "EXTENDED COVERAGE" },
+  { start: M(20), end: M(21), type: "scheduled_or_fox", label: "NEWS RECAP" },
+  { start: M(21), end: M(22), type: "scheduled_or_fox", label: "LATE NEWS" },
+  { start: M(22), end: M(24), type: "music",           label: "MUSIC VIDEOS" },
+  { start: M(0),  end: M(2),  type: "overnight_calm",  label: "OVERNIGHT · WEATHER" },
+  { start: M(2),  end: M(3),  type: "overnight_calm",  label: "OVERNIGHT · WEATHER" },
+  { start: M(3),  end: M(5),  type: "offline",         label: "OFF AIR" },
 ];
 
 function getSlot(minutes) {
@@ -344,12 +332,16 @@ function getSlot(minutes) {
    TIME ENGINE (real or simulated)
 ════════════════════════════════════════════ */
 let useSimTime = false;
-let simMinutes = 420; // 7:00 AM default
+let simMinutes = 420;
 
 function nowMinutes() {
   if (useSimTime) return simMinutes;
   const d = new Date();
   return d.getHours() * 60 + d.getMinutes();
+}
+
+function currentHour() {
+  return Math.floor(nowMinutes() / 60);
 }
 
 function fmtTime(mins) {
@@ -366,18 +358,15 @@ function fmtTime(mins) {
 function toggleDebug() {
   document.getElementById("debugPanel").classList.toggle("collapsed");
 }
-
 function onSimToggle() {
   useSimTime = document.getElementById("useSimTime").checked;
   evaluateSchedule(true);
 }
-
 function onSimSlide() {
   simMinutes = parseInt(document.getElementById("simSlider").value, 10);
   document.getElementById("simTimeDisplay").innerText = fmtTime(simMinutes);
   if (useSimTime) evaluateSchedule(true);
 }
-
 function jumpTo(h, m) {
   simMinutes = M(h, m);
   document.getElementById("simSlider").value = simMinutes;
@@ -385,77 +374,6 @@ function jumpTo(h, m) {
   document.getElementById("useSimTime").checked = true;
   useSimTime = true;
   evaluateSchedule(true);
-}
-
-// Is a video "recent" (published within the last N hours)?
-function isRecent(published, hoursWindow = 24) {
-  if (!published) return false;
-  const ageMs = Date.now() - published.getTime();
-  return ageMs <= hoursWindow * 60 * 60 * 1000;
-}
-
-const playedVideoIds   = { KVUE: new Set(), BBC: new Set(), FOX7: new Set() };
-const videoQueue       = { KVUE: [], BBC: [], FOX7: [] };
-const lastFeedFetch     = { KVUE: 0, BBC: 0, FOX7: 0 };
-const FEED_TTL_MS = 4 * 60 * 1000; // don't hammer the proxy more than every 4 min per channel
-
-// Fetches the FULL feed (up to ~15 entries) so we have a real queue of fresh videos,
-// not just "the one latest video" — this is what gives us volume instead of 1-per-hour.
-async function fetchFeedEntries(channelKey) {
-  const channelId = CHANNELS[channelKey];
-  const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
-  try {
-    const res = await fetch(RSS_PROXY + encodeURIComponent(feedUrl));
-    const xmlText = await res.text();
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(xmlText, "text/xml");
-    const entries = Array.from(xml.querySelectorAll("entry"));
-    return entries.map(entry => {
-      const videoId = entry.getElementsByTagNameNS("*", "videoId")[0]?.textContent
-                    || entry.querySelector("videoId")?.textContent;
-      const title = entry.querySelector("title")?.textContent || "Untitled";
-      const published = entry.querySelector("published")?.textContent || null;
-      return videoId ? { id: videoId, title, published: published ? new Date(published) : null } : null;
-    }).filter(Boolean);
-  } catch (e) {
-    console.warn(`RSS fetch failed for ${channelKey}:`, e);
-    return [];
-  }
-}
-
-// Refill a channel's queue with any entries not yet played (within a generous 24h freshness window)
-async function refillQueue(channelKey) {
-  const now = Date.now();
-  if (now - lastFeedFetch[channelKey] < FEED_TTL_MS && videoQueue[channelKey].length > 0) return;
-  lastFeedFetch[channelKey] = now;
-
-  const entries = await fetchFeedEntries(channelKey);
-  const fresh = entries.filter(e =>
-    !playedVideoIds[channelKey].has(e.id) && isRecent(e.published, 24)
-  );
-  // Queue oldest-first so playback feels like a real broadcast order
-  fresh.sort((a, b) => (a.published?.getTime() || 0) - (b.published?.getTime() || 0));
-  videoQueue[channelKey] = fresh;
-}
-
-// Pulls the next video to play for a given slot, trying each source in SLOT_SOURCES order.
-// Returns { id, title, source } or null if every source's queue is empty (triggers ad fallback).
-async function getNextVideoForSlot(slotType) {
-  const sources = SLOT_SOURCES[slotType] || ["KVUE"];
-  for (const src of sources) {
-    await refillQueue(src);
-    if (videoQueue[src].length > 0) {
-      const vid = videoQueue[src].shift();
-      playedVideoIds[src].add(vid.id);
-      // Cap memory of played IDs so very long sessions don't leak forever
-      if (playedVideoIds[src].size > 200) {
-        const arr = Array.from(playedVideoIds[src]);
-        playedVideoIds[src] = new Set(arr.slice(-100));
-      }
-      return { id: vid.id, title: vid.title, source: src };
-    }
-  }
-  return null; // nothing fresh anywhere — caller falls back to ads
 }
 
 /* ════════════════════════════════════════════
@@ -471,6 +389,20 @@ function playYouTube(videoId, opts = {}) {
     rel: "0"
   });
   iframe.src = `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
+  iframe.style.display = "block";
+  document.getElementById("offlineScreen").style.display = "none";
+  document.getElementById("standbyScreen").style.display = "none";
+}
+
+// Embeds a channel's live stream directly — auto-resolves to whatever is
+// currently live on that channel, no video ID needed, self-updating forever.
+function playChannelLive(channelId, opts = {}) {
+  const params = new URLSearchParams({
+    autoplay: "1",
+    controls: opts.controls ?? "1",
+    modestbranding: "1"
+  });
+  iframe.src = `https://www.youtube.com/embed/live_stream?channel=${channelId}&${params.toString()}`;
   iframe.style.display = "block";
   document.getElementById("offlineScreen").style.display = "none";
   document.getElementById("standbyScreen").style.display = "none";
@@ -497,141 +429,79 @@ function showStandby() {
    MUSIC ROTATION
 ════════════════════════════════════════════ */
 let musicIdx = Math.floor(Math.random() * MUSIC_VIDEOS.length);
+let musicTimer = null;
 function playNextMusic() {
   musicIdx = (musicIdx + 1) % MUSIC_VIDEOS.length;
   playYouTube(MUSIC_VIDEOS[musicIdx]);
-}
-
-/* ════════════════════════════════════════════
-   CORE SCHEDULE EVALUATOR
-   Runs every cycle: figure out slot, decide what plays
-════════════════════════════════════════════ */
-let currentSlotKey = null;
-let pollTimer = null;
-let videoEndTimer = null;
-
-function clearTimers() {
-  clearTimeout(pollTimer);
-  clearTimeout(videoEndTimer);
-}
-
-async function evaluateSchedule(force = false) {
-  const mins = nowMinutes();
-  const slot = getSlot(mins);
-  const slotKey = `${slot.start}-${slot.end}-${slot.type}`;
-
-  document.getElementById("ntClock").innerText = fmtTime(mins);
-  document.getElementById("currentSlotLabel").innerText = `Slot: ${slot.label}`;
-
-  if (slotKey === currentSlotKey && !force) {
-    // Same slot — just keep clock updated, don't restart content
-    return;
-  }
-
-  currentSlotKey = slotKey;
-  clearTimers();
-  newsBlockActiveStop(); // ensure any prior news chain stops before switching content types
-  document.getElementById("ntSegment").innerText = slot.label;
-
-  switch (slot.type) {
-    case "offline":
-      runOffline();
-      break;
-    case "overnight_calm":
-      runOvernightCalm();
-      break;
-    case "music":
-      runMusic();
-      break;
-    case "bbc":
-    case "kvue_replay":
-    case "kvue_highlights":
-    case "kvue_live":
-    case "kvue_extended":
-    case "kvue_recap":
-    case "kvue_late":
-    case "evening_preview":
-      runNewsChannel(slot.type, slot.label);
-      break;
-    default:
-      runOfflineFallback();
-  }
-}
-
-/* ── OFFLINE ── */
-function runOffline() {
-  showOffline();
-}
-
-/* ── OVERNIGHT CALM: ads + weather/time/headlines ── */
-async function runOvernightCalm() {
-  showStandby();
-  updateStandby();
-  // loop ads/music softly in background not needed; standby screen IS the content
-  // refresh ticker periodically
-  videoEndTimer = setTimeout(() => evaluateSchedule(), 5 * 60 * 1000);
-}
-
-async function updateStandby() {
-  loadWeatherInto("standbyWeather");
-  await refillQueue("KVUE");
-  const next = videoQueue["KVUE"][0];
-  const el = document.getElementById("standbyTicker");
-  el.innerText = next ? `LATEST: ${next.title}` : "Standing by for the next update.";
-}
-
-/* ── MUSIC BLOCK ── */
-function runMusic() {
-  playNextMusic();
-  // ~4.5 min per video, then advance — re-check schedule each time in case slot changed
-  videoEndTimer = setTimeout(() => {
-    evaluateSchedule(); // re-check if still in music slot
+  musicTimer = setTimeout(() => {
     if (currentSlotKey && currentSlotKey.includes("music")) playNextMusic();
   }, 4.5 * 60 * 1000);
 }
 
-/* ── NEWS BLOCK — chains multiple videos from the queue, falls back to ads only when truly empty ── */
-const AVG_NEWS_CLIP_MS = 6 * 60 * 1000; // assume ~6 min per segment if we can't read duration
-let newsBlockActive = false;
-function newsBlockActiveStop() { newsBlockActive = false; }
+/* ════════════════════════════════════════════
+   CORE SCHEDULE EVALUATOR
+════════════════════════════════════════════ */
+const FOX7_CHANNEL_ID = "UC5maSolHQX9er0BOxrzjMwA";
+const BBC_LIVE_VIDEO_ID = "vtX1m5_wlzw";
 
-async function runNewsChannel(slotType, label) {
-  document.getElementById("ntSegment").innerText = label;
-  newsBlockActive = true;
-  await playNextNewsItem(slotType);
-}
+let currentSlotKey = null;
 
-async function playNextNewsItem(slotType) {
-  if (!newsBlockActive) return;
+function evaluateSchedule(force = false) {
+  const mins = nowMinutes();
+  const slot = getSlot(mins);
+  const slotKey = `${slot.start}-${slot.end}-${slot.type}-${currentHour()}`;
 
-  const item = await getNextVideoForSlot(slotType);
+  document.getElementById("ntClock").innerText = fmtTime(mins);
+  document.getElementById("currentSlotLabel").innerText = `Slot: ${slot.label}`;
 
-  if (item) {
-    playYouTube(item.id);
-    document.getElementById("ntLogo").innerText = item.source;
-    document.getElementById("ntSegment").innerText = item.title.slice(0, 80);
-  } else {
-    // Every source's queue is dry — fill with ads rather than repeat
-    playYouTube(FILLER_AD_ID, { controls: "0" });
-    document.getElementById("ntLogo").innerText = "ADS";
-    document.getElementById("ntSegment").innerText = "Commercial break — more news shortly";
+  if (slotKey === currentSlotKey && !force) return;
+  currentSlotKey = slotKey;
+  clearTimeout(musicTimer);
+
+  document.getElementById("ntSegment").innerText = slot.label;
+
+  switch (slot.type) {
+    case "offline":
+      document.getElementById("ntLogo").innerText = "OFF AIR";
+      showOffline();
+      break;
+
+    case "overnight_calm":
+      document.getElementById("ntLogo").innerText = "NEWSNET";
+      showStandby();
+      break;
+
+    case "music":
+      document.getElementById("ntLogo").innerText = "MUSIC";
+      playNextMusic();
+      break;
+
+    case "bbc_live":
+      document.getElementById("ntLogo").innerText = "BBC";
+      playYouTube(BBC_LIVE_VIDEO_ID);
+      break;
+
+    case "scheduled_or_fox":
+      // If you gave me a specific video for this exact hour, play it (works today AND tomorrow
+      // automatically since we key off hour-of-day, not a specific date).
+      // Otherwise fall back to FOX 7 Austin's live stream so the slot is never empty.
+      const hour = Math.floor(mins / 60);
+      if (SCHEDULED_VIDEOS[hour]) {
+        document.getElementById("ntLogo").innerText = "KVUE";
+        playYouTube(SCHEDULED_VIDEOS[hour]);
+      } else {
+        document.getElementById("ntLogo").innerText = "FOX7";
+        playChannelLive(FOX7_CHANNEL_ID);
+      }
+      break;
+
+    default:
+      playYouTube(FILLER_AD_ID, { controls: "0" });
   }
-
-  // Chain to the next item automatically, re-checking the schedule hasn't moved on
-  videoEndTimer = setTimeout(() => {
-    if (newsBlockActive) playNextNewsItem(slotType);
-  }, AVG_NEWS_CLIP_MS);
-
-  // Also opportunistically top up queues in the background every cycle
-  for (const src of SLOT_SOURCES[slotType] || []) refillQueue(src);
-}
-
-function runOfflineFallback() {
-  playYouTube(FILLER_AD_ID, { controls: "0" });
 }
 
 /* ════════════════════════════════════════════
-   WEATHER
+   WEATHER (overnight standby)
 ════════════════════════════════════════════ */
 async function loadWeatherInto(elId) {
   try {
@@ -646,6 +516,7 @@ async function loadWeatherInto(elId) {
     if (el) el.innerText = "Weather unavailable";
   }
 }
+setInterval(() => loadWeatherInto("standbyWeather"), 15 * 60 * 1000);
 
 /* ════════════════════════════════════════════
    OFFLINE STATIC ANIMATION
@@ -670,7 +541,6 @@ function drawOfflineStatic() {
 }
 drawOfflineStatic();
 
-// Color bars for offline screen
 const obars = document.getElementById("offlineBars");
 ["#c0c0c0","#c0c000","#00c0c0","#00c000","#c000c0","#c00000","#0000c0"].forEach(c => {
   const d = document.createElement("div");
@@ -689,10 +559,8 @@ function tickClock() {
 setInterval(tickClock, 1000);
 tickClock();
 
-// Re-evaluate the schedule every 30s (catches slot transitions in real-time mode)
 setInterval(() => evaluateSchedule(), 30 * 1000);
-
-// Initial kick-off
+loadWeatherInto("standbyWeather");
 evaluateSchedule(true);
 </script>
 </body>
