@@ -279,7 +279,20 @@ const LAT = 30.5083, LON = -97.6789;
 
 const CHANNELS = {
   KVUE: "UCxXTyFekH99JnS3qaXIQW7A",
-  BBC:  "UC16niRr50-MSBwiO3YDb3RA"
+  BBC:  "UC16niRr50-MSBwiO3YDb3RA",
+  FOX7: "UC5maSolHQX9er0BOxrzjMwA"
+};
+
+// Which channels feed which slot types — round-robins across sources for reliability/volume
+const SLOT_SOURCES = {
+  kvue_replay:     ["KVUE", "FOX7"],
+  kvue_highlights: ["KVUE", "FOX7"],
+  kvue_live:       ["KVUE", "FOX7"],
+  kvue_extended:   ["KVUE", "FOX7"],
+  kvue_recap:      ["KVUE", "FOX7"],
+  kvue_late:       ["KVUE", "FOX7"],
+  evening_preview: ["KVUE", "FOX7"],
+  bbc:             ["BBC"]
 };
 
 const RSS_PROXY = "https://api.allorigins.win/raw?url=";
@@ -374,14 +387,21 @@ function jumpTo(h, m) {
   evaluateSchedule(true);
 }
 
-/* ════════════════════════════════════════════
-   RSS FETCHING — checks for fresh videos
-════════════════════════════════════════════ */
-const lastPlayedVideoId = { KVUE: null, BBC: null };
-const lastCheckedTime   = { KVUE: 0, BBC: 0 };
-let cachedFeedVideo     = { KVUE: null, BBC: null }; // {id, title, published}
+// Is a video "recent" (published within the last N hours)?
+function isRecent(published, hoursWindow = 24) {
+  if (!published) return false;
+  const ageMs = Date.now() - published.getTime();
+  return ageMs <= hoursWindow * 60 * 60 * 1000;
+}
 
-async function fetchLatestVideo(channelKey) {
+const playedVideoIds   = { KVUE: new Set(), BBC: new Set(), FOX7: new Set() };
+const videoQueue       = { KVUE: [], BBC: [], FOX7: [] };
+const lastFeedFetch     = { KVUE: 0, BBC: 0, FOX7: 0 };
+const FEED_TTL_MS = 4 * 60 * 1000; // don't hammer the proxy more than every 4 min per channel
+
+// Fetches the FULL feed (up to ~15 entries) so we have a real queue of fresh videos,
+// not just "the one latest video" — this is what gives us volume instead of 1-per-hour.
+async function fetchFeedEntries(channelKey) {
   const channelId = CHANNELS[channelKey];
   const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
   try {
@@ -389,27 +409,53 @@ async function fetchLatestVideo(channelKey) {
     const xmlText = await res.text();
     const parser = new DOMParser();
     const xml = parser.parseFromString(xmlText, "text/xml");
-    const entry = xml.querySelector("entry");
-    if (!entry) return null;
-
-    const videoId = entry.getElementsByTagNameNS("*", "videoId")[0]?.textContent
-                  || entry.querySelector("videoId")?.textContent;
-    const title = entry.querySelector("title")?.textContent || "Untitled";
-    const published = entry.querySelector("published")?.textContent || null;
-
-    if (!videoId) return null;
-    return { id: videoId, title, published: published ? new Date(published) : null };
+    const entries = Array.from(xml.querySelectorAll("entry"));
+    return entries.map(entry => {
+      const videoId = entry.getElementsByTagNameNS("*", "videoId")[0]?.textContent
+                    || entry.querySelector("videoId")?.textContent;
+      const title = entry.querySelector("title")?.textContent || "Untitled";
+      const published = entry.querySelector("published")?.textContent || null;
+      return videoId ? { id: videoId, title, published: published ? new Date(published) : null } : null;
+    }).filter(Boolean);
   } catch (e) {
     console.warn(`RSS fetch failed for ${channelKey}:`, e);
-    return null;
+    return [];
   }
 }
 
-// Is the latest video "recent" (published within the last N hours)?
-function isRecent(published, hoursWindow = 6) {
-  if (!published) return false;
-  const ageMs = Date.now() - published.getTime();
-  return ageMs <= hoursWindow * 60 * 60 * 1000;
+// Refill a channel's queue with any entries not yet played (within a generous 24h freshness window)
+async function refillQueue(channelKey) {
+  const now = Date.now();
+  if (now - lastFeedFetch[channelKey] < FEED_TTL_MS && videoQueue[channelKey].length > 0) return;
+  lastFeedFetch[channelKey] = now;
+
+  const entries = await fetchFeedEntries(channelKey);
+  const fresh = entries.filter(e =>
+    !playedVideoIds[channelKey].has(e.id) && isRecent(e.published, 24)
+  );
+  // Queue oldest-first so playback feels like a real broadcast order
+  fresh.sort((a, b) => (a.published?.getTime() || 0) - (b.published?.getTime() || 0));
+  videoQueue[channelKey] = fresh;
+}
+
+// Pulls the next video to play for a given slot, trying each source in SLOT_SOURCES order.
+// Returns { id, title, source } or null if every source's queue is empty (triggers ad fallback).
+async function getNextVideoForSlot(slotType) {
+  const sources = SLOT_SOURCES[slotType] || ["KVUE"];
+  for (const src of sources) {
+    await refillQueue(src);
+    if (videoQueue[src].length > 0) {
+      const vid = videoQueue[src].shift();
+      playedVideoIds[src].add(vid.id);
+      // Cap memory of played IDs so very long sessions don't leak forever
+      if (playedVideoIds[src].size > 200) {
+        const arr = Array.from(playedVideoIds[src]);
+        playedVideoIds[src] = new Set(arr.slice(-100));
+      }
+      return { id: vid.id, title: vid.title, source: src };
+    }
+  }
+  return null; // nothing fresh anywhere — caller falls back to ads
 }
 
 /* ════════════════════════════════════════════
@@ -484,6 +530,7 @@ async function evaluateSchedule(force = false) {
 
   currentSlotKey = slotKey;
   clearTimers();
+  newsBlockActiveStop(); // ensure any prior news chain stops before switching content types
   document.getElementById("ntSegment").innerText = slot.label;
 
   switch (slot.type) {
@@ -497,18 +544,14 @@ async function evaluateSchedule(force = false) {
       runMusic();
       break;
     case "bbc":
-      runNewsChannel("BBC", slot.label);
-      break;
     case "kvue_replay":
     case "kvue_highlights":
     case "kvue_live":
     case "kvue_extended":
     case "kvue_recap":
     case "kvue_late":
-      runNewsChannel("KVUE", slot.label);
-      break;
     case "evening_preview":
-      runNewsChannel("KVUE", slot.label);
+      runNewsChannel(slot.type, slot.label);
       break;
     default:
       runOfflineFallback();
@@ -531,9 +574,10 @@ async function runOvernightCalm() {
 
 async function updateStandby() {
   loadWeatherInto("standbyWeather");
-  const headline = await fetchLatestVideo("KVUE");
+  await refillQueue("KVUE");
+  const next = videoQueue["KVUE"][0];
   const el = document.getElementById("standbyTicker");
-  el.innerText = headline ? `LATEST: ${headline.title}` : "Standing by for the next update.";
+  el.innerText = next ? `LATEST: ${next.title}` : "Standing by for the next update.";
 }
 
 /* ── MUSIC BLOCK ── */
@@ -546,38 +590,40 @@ function runMusic() {
   }, 4.5 * 60 * 1000);
 }
 
-/* ── NEWS CHANNEL (KVUE or BBC) — RSS-driven with ad fallback ── */
-async function runNewsChannel(channelKey, label) {
+/* ── NEWS BLOCK — chains multiple videos from the queue, falls back to ads only when truly empty ── */
+const AVG_NEWS_CLIP_MS = 6 * 60 * 1000; // assume ~6 min per segment if we can't read duration
+let newsBlockActive = false;
+function newsBlockActiveStop() { newsBlockActive = false; }
+
+async function runNewsChannel(slotType, label) {
   document.getElementById("ntSegment").innerText = label;
-  await checkAndPlayNews(channelKey);
-  // Poll every 3 minutes for a fresh video while in this slot
-  pollTimer = setTimeout(() => {
-    if (currentSlotKey) checkAndPlayNews(channelKey);
-  }, 3 * 60 * 1000);
+  newsBlockActive = true;
+  await playNextNewsItem(slotType);
 }
 
-async function checkAndPlayNews(channelKey) {
-  const latest = await fetchLatestVideo(channelKey);
+async function playNextNewsItem(slotType) {
+  if (!newsBlockActive) return;
 
-  if (latest && latest.id !== lastPlayedVideoId[channelKey] && isRecent(latest.published, 6)) {
-    // Fresh video found — play it
-    lastPlayedVideoId[channelKey] = latest.id;
-    playYouTube(latest.id);
-    document.getElementById("ntLogo").innerText = channelKey;
-  } else if (latest && latest.id === lastPlayedVideoId[channelKey]) {
-    // Already played this one — fall back to ads instead of repeating
-    playYouTube(FILLER_AD_ID, { controls: "0" });
-    document.getElementById("ntLogo").innerText = "ADS";
-  } else if (latest) {
-    // Video exists but is stale (not recent) — play it once anyway as best-effort, else ads
-    lastPlayedVideoId[channelKey] = latest.id;
-    playYouTube(latest.id);
-    document.getElementById("ntLogo").innerText = channelKey;
+  const item = await getNextVideoForSlot(slotType);
+
+  if (item) {
+    playYouTube(item.id);
+    document.getElementById("ntLogo").innerText = item.source;
+    document.getElementById("ntSegment").innerText = item.title.slice(0, 80);
   } else {
-    // RSS fetch failed entirely — fallback to ads
+    // Every source's queue is dry — fill with ads rather than repeat
     playYouTube(FILLER_AD_ID, { controls: "0" });
     document.getElementById("ntLogo").innerText = "ADS";
+    document.getElementById("ntSegment").innerText = "Commercial break — more news shortly";
   }
+
+  // Chain to the next item automatically, re-checking the schedule hasn't moved on
+  videoEndTimer = setTimeout(() => {
+    if (newsBlockActive) playNextNewsItem(slotType);
+  }, AVG_NEWS_CLIP_MS);
+
+  // Also opportunistically top up queues in the background every cycle
+  for (const src of SLOT_SOURCES[slotType] || []) refillQueue(src);
 }
 
 function runOfflineFallback() {
