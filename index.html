@@ -1195,6 +1195,46 @@ function showAlertTakeover(props, tier) {
   document.getElementById("alertScreen").classList.add("show");
   document.getElementById("offlineScreen").style.display = "none";
   document.getElementById("standbyScreen").style.display = "none";
+
+  if (isNewAlert) {
+    // Speak the alert once it first appears, timed to start just after the tone burst
+    setTimeout(() => speakAlert(props), 8200);
+  }
+}
+
+/* ════════════════════════════════════════════
+   CREEPY DIGITAL VOICE READOUT
+   Uses the browser's built-in speech synthesis,
+   detuned to sound flat, robotic, and unsettling
+   rather than like a normal assistant voice.
+════════════════════════════════════════════ */
+function speakAlert(props) {
+  if (!('speechSynthesis' in window)) return;
+
+  const text =
+    `Attention. The National Weather Service has issued a ${props.event} ` +
+    `for the following areas: ${props.areaDesc}. ` +
+    `${props.headline || ""} ` +
+    `Take appropriate action immediately. This is not a test.`;
+
+  const utter = new SpeechSynthesisUtterance(text);
+  // Low pitch + slightly slow, flat rate gives a cold, synthetic, unsettling tone
+  // rather than a natural conversational voice.
+  utter.pitch = 0.3;
+  utter.rate = 0.85;
+  utter.volume = 1;
+
+  // Prefer a lower-register or more robotic-sounding system voice if one is available
+  const voices = window.speechSynthesis.getVoices();
+  const preferred = voices.find(v => /male|david|fred|alex|daniel/i.test(v.name)) || voices[0];
+  if (preferred) utter.voice = preferred;
+
+  window.speechSynthesis.cancel(); // clear any queued speech first
+  window.speechSynthesis.speak(utter);
+}
+
+function stopAlertVoice() {
+  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 }
 
 let takeoverToneInterval = null;
@@ -1217,6 +1257,7 @@ function stopTakeoverToneLoop() {
 function restoreFromTakeover() {
   takeoverActive = false;
   stopTakeoverToneLoop();
+  stopAlertVoice();
   document.getElementById("alertScreen").classList.remove("show");
   activeAlertIds.clear();
   currentSlotKey = null; // force evaluateSchedule to rebuild whatever should be playing now
