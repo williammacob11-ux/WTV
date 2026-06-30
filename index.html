@@ -1114,7 +1114,6 @@ async function checkNWSAlerts() {
 
     if (TAKEOVER_SEVERITIES.includes(worst.tier)) {
       showAlertTakeover(worst.props, worst.tier);
-      scheduleAutoExpire(worst.props);
     } else {
       showAdvisoryBanner(worst.props);
     }
@@ -1202,6 +1201,10 @@ function showAlertTakeover(props, tier) {
   document.getElementById("alertScreen").classList.add("show");
   document.getElementById("offlineScreen").style.display = "none";
   document.getElementById("standbyScreen").style.display = "none";
+
+  // Always (re)schedule the auto-expiry here, not in the caller — this guarantees
+  // both real NWS alerts AND test-panel alerts actually end on their own.
+  scheduleAutoExpire(props);
 
   if (isNewAlert) {
     // Speak the alert once it first appears, timed to start just after the tone burst
@@ -1294,7 +1297,7 @@ function fireTestAlert() {
     description: desc,
     headline: `${event} issued for ${areas}`,
     severity: "Severe",
-    expires: new Date(Date.now() + 10 * 60 * 1000).toISOString() // fake 10-min expiry
+    expires: new Date(Date.now() + 30 * 1000).toISOString() // fake 30-second expiry for quick testing
   };
 
   const tier = classifyAlert(fakeProps.severity, fakeProps.event);
