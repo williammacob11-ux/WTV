@@ -152,87 +152,73 @@
   #alertScreen {
     display: none;
     position: fixed; inset: 0;
-    background: #1a0000;
+    background: #000;
     z-index: 20000;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 40px;
+    align-items: flex-start;
+    justify-content: flex-start;
+    text-align: left;
+    padding: 0;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
   }
 
   #alertScreen.show { display: flex; }
 
-  #alertScreen::before {
-    content: "";
-    position: absolute; inset: 0;
-    background: repeating-linear-gradient(135deg, rgba(255,0,0,0.06) 0px, rgba(255,0,0,0.06) 12px, transparent 12px, transparent 24px);
-    animation: alertStripeMove 1.5s linear infinite;
-    pointer-events: none;
-  }
-
-  @keyframes alertStripeMove {
-    from { background-position: 0 0; }
-    to   { background-position: 48px 0; }
-  }
-
   #alertScreen .alert-banner-top {
-    background: #c1121f;
+    background: #000;
+    color: #fff;
     width: 100%;
-    padding: 10px;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 14px;
-    letter-spacing: 3px;
-    position: absolute;
-    top: 0; left: 0;
-    animation: alertPulse 1s ease-in-out infinite;
-  }
-
-  @keyframes alertPulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.55; }
+    padding: 14px 24px;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
+    font-size: 15px;
+    letter-spacing: 2px;
+    border-bottom: 3px solid #fff;
+    text-transform: uppercase;
   }
 
   #alertScreen .alert-event {
-    font-size: 56px;
+    width: 100%;
+    background: #c1121f;
+    color: #fff;
+    font-size: 42px;
     font-weight: 700;
-    color: #ff5252;
-    letter-spacing: 2px;
-    margin-bottom: 18px;
+    letter-spacing: 1px;
     text-transform: uppercase;
-    position: relative;
-    z-index: 1;
+    padding: 18px 24px;
+    border-bottom: 3px solid #fff;
   }
 
   #alertScreen .alert-areas {
-    font-size: 22px;
-    color: #fff;
-    margin-bottom: 22px;
-    max-width: 80%;
-    letter-spacing: 1px;
-    position: relative;
-    z-index: 1;
+    width: 100%;
+    font-size: 18px;
+    color: #000;
+    background: #fff;
+    padding: 14px 24px;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid #000;
   }
 
   #alertScreen .alert-desc {
-    font-size: 15px;
-    color: rgba(255,255,255,0.75);
-    max-width: 75%;
-    line-height: 1.5;
-    position: relative;
-    z-index: 1;
-    max-height: 30vh;
+    width: 100%;
+    flex: 1;
+    font-size: 16px;
+    color: #fff;
+    background: #000;
+    padding: 24px;
+    line-height: 1.6;
     overflow-y: auto;
+    letter-spacing: 0.3px;
   }
 
   #alertScreen .alert-expires {
-    font-family: 'Share Tech Mono', monospace;
+    width: 100%;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
     font-size: 13px;
-    color: rgba(255,255,255,0.4);
-    margin-top: 18px;
-    letter-spacing: 2px;
-    position: relative;
-    z-index: 1;
+    color: #000;
+    background: #fff;
+    padding: 10px 24px;
+    letter-spacing: 1px;
+    border-top: 1px solid #000;
   }
 
   /* ───────── WEATHER ADVISORY — BANNER OVERLAY ───────── */
@@ -1085,12 +1071,31 @@ async function fetchNWSAlerts() {
   throw new Error("All NWS proxies failed");
 }
 
+let takeoverExpiryTimer = null;
+
+function scheduleAutoExpire(props) {
+  clearTimeout(takeoverExpiryTimer);
+  if (!props.expires) return; // no expiry given — relies on NWS dropping it from the feed
+  const msUntilExpiry = new Date(props.expires).getTime() - Date.now();
+  if (msUntilExpiry <= 0) return; // already expired somehow — let normal flow clear it
+  takeoverExpiryTimer = setTimeout(() => {
+    if (takeoverActive) restoreFromTakeover();
+  }, msUntilExpiry);
+}
+
 async function checkNWSAlerts() {
   try {
     const data = await fetchNWSAlerts();
     const features = data.features || [];
 
-    if (features.length === 0) {
+    // Drop anything already past its own expiry time, even if NWS is still listing it
+    const now = Date.now();
+    const live = features.filter(f => {
+      const exp = f.properties.expires;
+      return !exp || new Date(exp).getTime() > now;
+    });
+
+    if (live.length === 0) {
       clearAllAlerts();
       return;
     }
@@ -1099,7 +1104,7 @@ async function checkNWSAlerts() {
     const rank = { "Emergency": 3, "Warning": 2, "Watch": 1, "Advisory": 0 };
     let worst = null;
 
-    for (const f of features) {
+    for (const f of live) {
       const p = f.properties;
       const tier = classifyAlert(p.severity, p.event);
       if (!worst || rank[tier] > rank[worst.tier]) {
@@ -1109,6 +1114,7 @@ async function checkNWSAlerts() {
 
     if (TAKEOVER_SEVERITIES.includes(worst.tier)) {
       showAlertTakeover(worst.props, worst.tier);
+      scheduleAutoExpire(worst.props);
     } else {
       showAdvisoryBanner(worst.props);
     }
@@ -1119,6 +1125,7 @@ async function checkNWSAlerts() {
 
 function clearAllAlerts() {
   document.getElementById("advisoryBanner").classList.remove("show");
+  clearTimeout(takeoverExpiryTimer);
   if (takeoverActive) restoreFromTakeover();
 }
 
@@ -1258,6 +1265,7 @@ function restoreFromTakeover() {
   takeoverActive = false;
   stopTakeoverToneLoop();
   stopAlertVoice();
+  clearTimeout(takeoverExpiryTimer);
   document.getElementById("alertScreen").classList.remove("show");
   activeAlertIds.clear();
   currentSlotKey = null; // force evaluateSchedule to rebuild whatever should be playing now
