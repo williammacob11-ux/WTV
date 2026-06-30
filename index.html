@@ -241,8 +241,10 @@
     position: fixed;
     bottom: 70px; left: 0; right: 0;
     z-index: 15000;
-    background: rgba(184,134,11,0.92);
-    color: #1a1200;
+    background: rgba(0,0,0,0.92);
+    border-top: 2px solid #c1121f;
+    border-bottom: 2px solid #c1121f;
+    color: #fff;
     padding: 10px 20px;
     font-family: 'Share Tech Mono', monospace;
     font-size: 14px;
@@ -254,8 +256,8 @@
   #advisoryBanner.show { display: flex; }
 
   #advisoryBanner .adv-tag {
-    background: #1a1200;
-    color: #ffd76a;
+    background: #c1121f;
+    color: #fff;
     font-weight: 700;
     padding: 3px 10px;
     border-radius: 3px;
@@ -1120,6 +1122,8 @@ function clearAllAlerts() {
   if (takeoverActive) restoreFromTakeover();
 }
 
+let advisoryToneAlertIds = new Set();
+
 function showAdvisoryBanner(props) {
   // Don't show a banner if we're already in a full takeover for something worse
   if (takeoverActive) return;
@@ -1127,25 +1131,35 @@ function showAdvisoryBanner(props) {
   document.getElementById("advisoryText").innerText =
     `${props.event.toUpperCase()} — ${props.areaDesc} — ${props.headline || props.event}`;
   el.classList.add("show");
+
+  // Brief tone, and only the first time we see this specific advisory — not on every poll
+  const alertId = props.id || (props.event + props.areaDesc);
+  if (!advisoryToneAlertIds.has(alertId)) {
+    advisoryToneAlertIds.add(alertId);
+    playAlertTone(2.5); // short tone for advisories
+  }
 }
 
 let alertToneAudio = null;
-function playAlertTone() {
-  // Simple synthesized two-tone alert beep using the Web Audio API — no external file needed.
+function playAlertTone(durationSeconds = 8) {
+  // Synthesized EAS-style attention tone — generated fresh via Web Audio API,
+  // not a recording of any broadcast. Real EAS plays 853Hz + 960Hz simultaneously
+  // (not back-to-back), so both oscillators run together for the duration.
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const playTone = (freq, start, dur) => {
+    const makeTone = (freq) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.frequency.value = freq;
       osc.type = "square";
-      gain.gain.value = 0.15;
+      gain.gain.value = 0.12;
       osc.connect(gain).connect(ctx.destination);
-      osc.start(ctx.currentTime + start);
-      osc.stop(ctx.currentTime + start + dur);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + durationSeconds);
+      return osc;
     };
-    playTone(853, 0, 0.8);
-    playTone(960, 0.85, 0.8);
+    makeTone(853);
+    makeTone(960);
   } catch (e) {
     console.warn("Alert tone failed:", e);
   }
@@ -1162,6 +1176,7 @@ function showAlertTakeover(props, tier) {
     stopPlayer();
     clearTimeout(overnightTimer);
     onMusicEndedCallback = null;
+    startTakeoverToneLoop(); // sound plays continuously while the takeover is up
   }
 
   takeoverActive = true;
@@ -1180,12 +1195,28 @@ function showAlertTakeover(props, tier) {
   document.getElementById("alertScreen").classList.add("show");
   document.getElementById("offlineScreen").style.display = "none";
   document.getElementById("standbyScreen").style.display = "none";
+}
 
-  if (isNewAlert) playAlertTone(); // only play the tone once per distinct alert, not every poll
+let takeoverToneInterval = null;
+
+function startTakeoverToneLoop() {
+  playAlertTone(8); // initial long tone burst
+  clearInterval(takeoverToneInterval);
+  // Re-trigger every 9s so the tone effectively plays continuously while the
+  // takeover screen is active, with a brief natural gap between bursts.
+  takeoverToneInterval = setInterval(() => {
+    if (takeoverActive) playAlertTone(8);
+  }, 9000);
+}
+
+function stopTakeoverToneLoop() {
+  clearInterval(takeoverToneInterval);
+  takeoverToneInterval = null;
 }
 
 function restoreFromTakeover() {
   takeoverActive = false;
+  stopTakeoverToneLoop();
   document.getElementById("alertScreen").classList.remove("show");
   activeAlertIds.clear();
   currentSlotKey = null; // force evaluateSchedule to rebuild whatever should be playing now
