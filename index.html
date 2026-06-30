@@ -71,6 +71,72 @@
   }
   #debugPanel button:hover { background: #333; }
 
+  /* ───────── ALERT TEST PANEL ───────── */
+  #alertTestPanel {
+    position: fixed;
+    top: 10px; right: 10px;
+    background: rgba(0,0,0,0.88);
+    border: 1px solid rgba(255,80,80,0.4);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 230px;
+  }
+
+  #alertTestPanel.collapsed .panel-body { display: none; }
+
+  #alertTestPanel .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    color: #ff6b6b;
+    letter-spacing: 1px;
+  }
+
+  #alertTestPanel label {
+    color: rgba(255,255,255,0.6);
+    font-size: 10px;
+    display: block;
+    margin-top: 4px;
+  }
+
+  #alertTestPanel select,
+  #alertTestPanel input[type="text"] {
+    width: 100%;
+    background: #111;
+    color: #fff;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    margin-top: 2px;
+  }
+
+  #alertTestPanel button {
+    background: #b91c1c;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    margin-top: 6px;
+  }
+  #alertTestPanel button:hover { background: #d32f2f; }
+
+  #alertTestPanel button.clear-btn {
+    background: #333;
+  }
+  #alertTestPanel button.clear-btn:hover { background: #444; }
+
   #simTimeDisplay { color: #0ff; font-size: 14px; }
 
   /* ───────── PLAYER ───────── */
@@ -416,6 +482,39 @@
   </div>
 
   <!-- ADVISORY BANNER (non-blocking) -->
+  <!-- ALERT TEST PANEL -->
+  <div id="alertTestPanel">
+    <div class="panel-header" onclick="toggleAlertTestPanel()">
+      <span>🚨 ALERT TEST</span>
+      <span id="alertTestToggleIcon">▾</span>
+    </div>
+    <div class="panel-body">
+      <label>Event type</label>
+      <select id="testEventType">
+        <option value="Tornado Warning">Tornado Warning</option>
+        <option value="Severe Thunderstorm Warning">Severe Thunderstorm Warning</option>
+        <option value="Flash Flood Warning">Flash Flood Warning</option>
+        <option value="Tornado Watch">Tornado Watch</option>
+        <option value="Severe Thunderstorm Watch">Severe Thunderstorm Watch</option>
+        <option value="Winter Storm Warning">Winter Storm Warning</option>
+        <option value="Extreme Wind Warning">Extreme Wind Warning</option>
+        <option value="Flood Advisory">Flood Advisory</option>
+        <option value="Heat Advisory">Heat Advisory</option>
+        <option value="Wind Advisory">Wind Advisory</option>
+        <option value="Special Weather Statement">Special Weather Statement</option>
+      </select>
+
+      <label>Affected areas</label>
+      <input type="text" id="testAreas" value="Leander, Cedar Park, Liberty Hill, Round Rock">
+
+      <label>Description (optional)</label>
+      <input type="text" id="testDesc" value="A severe storm was located near the area, moving northeast at 35 mph.">
+
+      <button onclick="fireTestAlert()">FIRE TEST ALERT</button>
+      <button class="clear-btn" onclick="clearTestAlert()">CLEAR ALERT</button>
+    </div>
+  </div>
+
   <div id="advisoryBanner">
     <div class="adv-tag">ADVISORY</div>
     <div class="adv-text" id="advisoryText">—</div>
@@ -1091,6 +1190,45 @@ function restoreFromTakeover() {
   activeAlertIds.clear();
   currentSlotKey = null; // force evaluateSchedule to rebuild whatever should be playing now
   evaluateSchedule(true);
+}
+
+/* ════════════════════════════════════════════
+   ALERT TEST PANEL — lets you simulate any alert
+   without waiting for a real one. Uses the exact
+   same showAlertTakeover/showAdvisoryBanner code
+   path as real NWS alerts, so it's a true test.
+════════════════════════════════════════════ */
+function toggleAlertTestPanel() {
+  document.getElementById("alertTestPanel").classList.toggle("collapsed");
+}
+
+function fireTestAlert() {
+  const event = document.getElementById("testEventType").value;
+  const areas = document.getElementById("testAreas").value || "Test Area";
+  const desc  = document.getElementById("testDesc").value || "This is a simulated test alert.";
+
+  const fakeProps = {
+    id: "TEST-" + Date.now(), // unique each fire so the tone replays every test
+    event: event,
+    areaDesc: areas,
+    description: desc,
+    headline: `${event} issued for ${areas}`,
+    severity: "Severe",
+    expires: new Date(Date.now() + 10 * 60 * 1000).toISOString() // fake 10-min expiry
+  };
+
+  const tier = classifyAlert(fakeProps.severity, fakeProps.event);
+
+  if (TAKEOVER_SEVERITIES.includes(tier)) {
+    showAlertTakeover(fakeProps, tier);
+  } else {
+    showAdvisoryBanner(fakeProps);
+  }
+}
+
+function clearTestAlert() {
+  document.getElementById("advisoryBanner").classList.remove("show");
+  if (takeoverActive) restoreFromTakeover();
 }
 
 setInterval(checkNWSAlerts, NWS_ALERT_CHECK_MS);
