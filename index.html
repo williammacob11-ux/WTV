@@ -82,6 +82,129 @@
   }
 
   /* ───────── OFFLINE SCREEN ───────── */
+  /* ───────── WEATHER ALERT — FULL TAKEOVER (warnings/watches+) ───────── */
+  #alertScreen {
+    display: none;
+    position: fixed; inset: 0;
+    background: #1a0000;
+    z-index: 20000;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 40px;
+  }
+
+  #alertScreen.show { display: flex; }
+
+  #alertScreen::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(135deg, rgba(255,0,0,0.06) 0px, rgba(255,0,0,0.06) 12px, transparent 12px, transparent 24px);
+    animation: alertStripeMove 1.5s linear infinite;
+    pointer-events: none;
+  }
+
+  @keyframes alertStripeMove {
+    from { background-position: 0 0; }
+    to   { background-position: 48px 0; }
+  }
+
+  #alertScreen .alert-banner-top {
+    background: #c1121f;
+    width: 100%;
+    padding: 10px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    letter-spacing: 3px;
+    position: absolute;
+    top: 0; left: 0;
+    animation: alertPulse 1s ease-in-out infinite;
+  }
+
+  @keyframes alertPulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.55; }
+  }
+
+  #alertScreen .alert-event {
+    font-size: 56px;
+    font-weight: 700;
+    color: #ff5252;
+    letter-spacing: 2px;
+    margin-bottom: 18px;
+    text-transform: uppercase;
+    position: relative;
+    z-index: 1;
+  }
+
+  #alertScreen .alert-areas {
+    font-size: 22px;
+    color: #fff;
+    margin-bottom: 22px;
+    max-width: 80%;
+    letter-spacing: 1px;
+    position: relative;
+    z-index: 1;
+  }
+
+  #alertScreen .alert-desc {
+    font-size: 15px;
+    color: rgba(255,255,255,0.75);
+    max-width: 75%;
+    line-height: 1.5;
+    position: relative;
+    z-index: 1;
+    max-height: 30vh;
+    overflow-y: auto;
+  }
+
+  #alertScreen .alert-expires {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    color: rgba(255,255,255,0.4);
+    margin-top: 18px;
+    letter-spacing: 2px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ───────── WEATHER ADVISORY — BANNER OVERLAY ───────── */
+  #advisoryBanner {
+    display: none;
+    position: fixed;
+    bottom: 70px; left: 0; right: 0;
+    z-index: 15000;
+    background: rgba(184,134,11,0.92);
+    color: #1a1200;
+    padding: 10px 20px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    letter-spacing: 1px;
+    align-items: center;
+    gap: 14px;
+  }
+
+  #advisoryBanner.show { display: flex; }
+
+  #advisoryBanner .adv-tag {
+    background: #1a1200;
+    color: #ffd76a;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+    letter-spacing: 2px;
+    flex-shrink: 0;
+  }
+
+  #advisoryBanner .adv-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   #offlineScreen {
     display: none;
     position: absolute; inset: 0;
@@ -283,6 +406,21 @@
     <div id="standbyForecast"></div>
   </div>
 
+  <!-- FULL TAKEOVER WEATHER ALERT -->
+  <div id="alertScreen">
+    <div class="alert-banner-top">⚠ NATIONAL WEATHER SERVICE EMERGENCY ALERT ⚠</div>
+    <div class="alert-event" id="alertEvent">TORNADO WARNING</div>
+    <div class="alert-areas" id="alertAreas">— areas —</div>
+    <div class="alert-desc" id="alertDesc">—</div>
+    <div class="alert-expires" id="alertExpires">—</div>
+  </div>
+
+  <!-- ADVISORY BANNER (non-blocking) -->
+  <div id="advisoryBanner">
+    <div class="adv-tag">ADVISORY</div>
+    <div class="adv-text" id="advisoryText">—</div>
+  </div>
+
   <div id="channelBug">NEWSNET 24</div>
 
   <div id="lowerThird">
@@ -331,6 +469,15 @@
 const OWM_KEY = "69d758106d8333cb8e806b8d3bff6d15";
 const LAT = 30.5083, LON = -97.6789;
 
+// NWS county code for Williamson County, TX — covers Leander, Cedar Park,
+// Liberty Hill, Round Rock, and Georgetown. No API key needed.
+const NWS_ZONE = "TXC491";
+const NWS_ALERT_CHECK_MS = 2 * 60 * 1000; // poll every 2 minutes
+
+// Severities that get a full-screen takeover instead of a banner.
+// Everything NOT in this set (e.g. "Advisory") is treated as banner-only.
+const TAKEOVER_SEVERITIES = ["Warning", "Watch", "Emergency"];
+
 // Official 24/7 live news streams — these auto-update themselves on YouTube's end,
 // so there is nothing for you to maintain here.
 const LIVE_STREAMS = {
@@ -342,7 +489,7 @@ const LIVE_STREAMS = {
 const MUSIC_VIDEOS = [
   "sOnqjkJTMaA", "Zi_XLOBDo_Y", "YNzuiRuQNYY", "PIb6AZdTr-A",
   "t4QK8RxCAwo", "wp43OdtAAkM", "FTQbiNvZqaY", "SZQIfEN_p2A",
-  "m3-hY-hlhBg", "xMaE6toi4mk", 
+  "m3-hY-hlhBg", "xMaE6toi4mk",
   // Newly added songs
   "Sd4SJVsTulc",  // Bad — Michael Jackson
   "h1elr5bmZC8",  // Chicago — Michael Jackson
@@ -351,14 +498,6 @@ const MUSIC_VIDEOS = [
   "Qt2mbGP6vFI",  // Another Day in Paradise — Phil Collins
   "WrMGGouem3c",  // Suspicious Minds — Elvis Presley
   "9jK-NcRmVcw"   // The Final Countdown — Europe
-  "hDU4GB1PTxc"   // I Knew it, I knew you - Taylor Swift
-  "qnkuBUAwfe0"   // One Last Breath - Creed
-  "psuRGfAaju4"   // Fireflies - Owl City
-  "cjVQ36NhbMk"   // How To Save A Life - The Fray
-  "y2bVIBwpCTA"   // I Want You Back - Jackson 5
-  "qM1YMeDsc-M"   // When Can I See You Again? - Owl City
-  "s1tAYmMjLdY"   // I Miss You - Blink-182
-  "1OxOHtD0RDw"   // I Just Wanna Shine - Fitz And The Tantrums
   // "I Knew It" and "I Knew You" couldn't be verified as real MJ tracks —
   // skipped rather than guess wrong. Tell me the artist and I'll add them.
 ];
@@ -799,10 +938,169 @@ function tickClock() {
 setInterval(tickClock, 1000);
 tickClock();
 
+/* ════════════════════════════════════════════
+   NWS WEATHER ALERTS — Williamson County, TX
+   Polls the free public NWS API. Advisories get a
+   non-blocking banner; anything more severe (Watch,
+   Warning, Emergency) takes over the full screen,
+   pauses whatever's playing, and restores it after
+   the alert's own expiration time.
+════════════════════════════════════════════ */
+let activeAlertIds = new Set();
+let takeoverActive = false;
+let preAlertSlotKey = null; // remembers what was playing so we can resume it
+
+function classifyAlert(severity, event) {
+  // NWS "severity" field is one of: Extreme, Severe, Moderate, Minor, Unknown.
+  // We instead key off the event's own naming convention, since "Tornado Warning",
+  // "Flood Watch", "Heat Advisory" etc. tell us directly what tier it is.
+  const lower = (event || "").toLowerCase();
+  if (lower.includes("emergency")) return "Emergency";
+  if (lower.includes("warning"))   return "Warning";
+  if (lower.includes("watch"))     return "Watch";
+  return "Advisory"; // covers Advisory, Statement, Outlook, Special Weather Statement, etc.
+}
+
+// NWS doesn't reliably send CORS headers for browser fetches, so route through
+// a couple of free proxies that add them — automatic fallback, nothing to set up.
+const NWS_PROXIES = [
+  (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+  (url) => "https://corsproxy.io/?url=" + encodeURIComponent(url),
+  (url) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url)
+];
+
+async function fetchNWSAlerts() {
+  const targetUrl = `https://api.weather.gov/alerts/active?zone=${NWS_ZONE}`;
+  for (const buildProxyUrl of NWS_PROXIES) {
+    try {
+      const res = await fetch(buildProxyUrl(targetUrl));
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data && data.features) return data;
+    } catch (e) {
+      // try next proxy
+    }
+  }
+  throw new Error("All NWS proxies failed");
+}
+
+async function checkNWSAlerts() {
+  try {
+    const data = await fetchNWSAlerts();
+    const features = data.features || [];
+
+    if (features.length === 0) {
+      clearAllAlerts();
+      return;
+    }
+
+    // Rank: Emergency > Warning > Watch > Advisory — always surface the worst active one
+    const rank = { "Emergency": 3, "Warning": 2, "Watch": 1, "Advisory": 0 };
+    let worst = null;
+
+    for (const f of features) {
+      const p = f.properties;
+      const tier = classifyAlert(p.severity, p.event);
+      if (!worst || rank[tier] > rank[worst.tier]) {
+        worst = { tier, props: p };
+      }
+    }
+
+    if (TAKEOVER_SEVERITIES.includes(worst.tier)) {
+      showAlertTakeover(worst.props, worst.tier);
+    } else {
+      showAdvisoryBanner(worst.props);
+    }
+  } catch (e) {
+    console.warn("NWS alert check failed:", e);
+  }
+}
+
+function clearAllAlerts() {
+  document.getElementById("advisoryBanner").classList.remove("show");
+  if (takeoverActive) restoreFromTakeover();
+}
+
+function showAdvisoryBanner(props) {
+  // Don't show a banner if we're already in a full takeover for something worse
+  if (takeoverActive) return;
+  const el = document.getElementById("advisoryBanner");
+  document.getElementById("advisoryText").innerText =
+    `${props.event.toUpperCase()} — ${props.areaDesc} — ${props.headline || props.event}`;
+  el.classList.add("show");
+}
+
+let alertToneAudio = null;
+function playAlertTone() {
+  // Simple synthesized two-tone alert beep using the Web Audio API — no external file needed.
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const playTone = (freq, start, dur) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = "square";
+      gain.gain.value = 0.15;
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + dur);
+    };
+    playTone(853, 0, 0.8);
+    playTone(960, 0.85, 0.8);
+  } catch (e) {
+    console.warn("Alert tone failed:", e);
+  }
+}
+
+function showAlertTakeover(props, tier) {
+  const alertId = props.id || (props.event + props.areaDesc);
+  const isNewAlert = !activeAlertIds.has(alertId);
+
+  document.getElementById("advisoryBanner").classList.remove("show");
+
+  if (!takeoverActive) {
+    preAlertSlotKey = currentSlotKey; // remember what to resume later
+    stopPlayer();
+    clearTimeout(overnightTimer);
+    onMusicEndedCallback = null;
+  }
+
+  takeoverActive = true;
+  activeAlertIds.add(alertId);
+
+  document.getElementById("alertEvent").innerText = props.event.toUpperCase();
+  document.getElementById("alertAreas").innerText = props.areaDesc;
+  document.getElementById("alertDesc").innerText = props.description
+    ? props.description.slice(0, 600)
+    : (props.headline || "Take appropriate action immediately.");
+  const exp = props.expires ? new Date(props.expires) : null;
+  document.getElementById("alertExpires").innerText = exp
+    ? `IN EFFECT UNTIL ${exp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    : "IN EFFECT UNTIL FURTHER NOTICE";
+
+  document.getElementById("alertScreen").classList.add("show");
+  document.getElementById("offlineScreen").style.display = "none";
+  document.getElementById("standbyScreen").style.display = "none";
+
+  if (isNewAlert) playAlertTone(); // only play the tone once per distinct alert, not every poll
+}
+
+function restoreFromTakeover() {
+  takeoverActive = false;
+  document.getElementById("alertScreen").classList.remove("show");
+  activeAlertIds.clear();
+  currentSlotKey = null; // force evaluateSchedule to rebuild whatever should be playing now
+  evaluateSchedule(true);
+}
+
+setInterval(checkNWSAlerts, NWS_ALERT_CHECK_MS);
+checkNWSAlerts();
+
 setInterval(() => evaluateSchedule(), 30 * 1000);
 loadOvernightWeather();
 loadYouTubeAPI();
 evaluateSchedule(true);
+
 </script>
 </body>
 </html>
