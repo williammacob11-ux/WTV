@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NEWSNET 24</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    color: #fff;
+    font-family: 'Oswald', Arial, sans-serif;
+    overflow: hidden;
+  }
+
+  #screen {
+    position: relative;
+    width: 100%; height: 100vh;
+    background: #000;
+  }
+
+  /* ───────── DEBUG / TIME-SKIP PANEL ───────── */
+  #debugPanel {
+    position: fixed;
+    top: 10px; left: 10px;
+    background: rgba(0,0,0,0.85);
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 230px;
+  }
+
+  #debugPanel.collapsed .panel-body { display: none; }
+
+  #debugPanel .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    color: #0f0;
+    letter-spacing: 1px;
+  }
+
+  #debugPanel input[type="range"] { width: 100%; }
+
+  #debugPanel .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  #debugPanel button {
+    background: #222;
+    color: #fff;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  #debugPanel button:hover { background: #333; }
+
+  #simTimeDisplay { color: #0ff; font-size: 14px; }
+
+  /* ───────── PLAYER ───────── */
+  #playerFrame {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    border: none;
+    z-index: 1;
+  }
+
+  /* ───────── OFFLINE SCREEN ───────── */
+  #offlineScreen {
+    display: none;
+    position: absolute; inset: 0;
+    background: #000;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 5;
+  }
+
+  #offlineScreen .bars {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 22%;
+    display: flex;
+  }
+  #offlineScreen .bars div { flex: 1; }
+
+  #offlineScreen .msg {
+    font-size: 28px;
+    letter-spacing: 6px;
+    color: #ccc;
+    text-align: center;
+  }
+
+  #offlineScreen .submsg {
+    font-size: 14px;
+    color: rgba(255,255,255,0.4);
+    letter-spacing: 3px;
+    margin-top: 10px;
+  }
+
+  #offlineScreen canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    opacity: 0.08;
+  }
+
+  /* ───────── STANDBY / LATE-NIGHT SCREEN ───────── */
+  #standbyScreen {
+    display: none;
+    position: absolute; inset: 0;
+    background: linear-gradient(160deg,#06090f,#0c1322);
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 5;
+    gap: 18px;
+  }
+
+  #standbyScreen .net-id {
+    font-size: 18px;
+    letter-spacing: 6px;
+    color: rgba(255,255,255,0.4);
+  }
+
+  #standbyScreen .standby-time {
+    font-size: 80px;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  #standbyScreen .standby-weather {
+    font-size: 22px;
+    color: #9fd8ff;
+  }
+
+  /* ───────── LOWER THIRD / BUG ───────── */
+  #lowerThird {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+    padding: 14px 20px;
+    pointer-events: none;
+  }
+
+  #lowerThird .net-logo {
+    background: #c1121f;
+    color: #fff;
+    font-weight: 700;
+    font-size: 16px;
+    letter-spacing: 2px;
+    padding: 6px 14px;
+    margin-right: 14px;
+  }
+
+  #lowerThird .segment-label {
+    font-size: 15px;
+    color: #fff;
+    letter-spacing: 1px;
+    flex: 1;
+  }
+
+  #lowerThird .clock-mini {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 16px;
+    color: #fff;
+    margin-left: 14px;
+  }
+
+  #channelBug {
+    position: absolute;
+    top: 14px; right: 18px;
+    font-size: 13px;
+    letter-spacing: 3px;
+    color: rgba(255,255,255,0.55);
+    z-index: 50;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="screen">
+
+  <iframe id="playerFrame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+
+  <div id="offlineScreen">
+    <canvas id="offlineStatic"></canvas>
+    <div class="bars" id="offlineBars"></div>
+    <div class="msg">WE'LL BE RIGHT BACK</div>
+    <div class="submsg">NEWSNET 24 IS OFF THE AIR · BROADCAST RESUMES AT 5:00 AM</div>
+  </div>
+
+  <div id="standbyScreen">
+    <div class="net-id">NEWSNET 24 · OVERNIGHT</div>
+    <div class="standby-time" id="standbyTime">--:--</div>
+    <div class="standby-weather" id="standbyWeather">Loading weather...</div>
+  </div>
+
+  <div id="channelBug">NEWSNET 24</div>
+
+  <div id="lowerThird">
+    <div class="net-logo" id="ntLogo">NEWSNET</div>
+    <div class="segment-label" id="ntSegment">Loading schedule...</div>
+    <div class="clock-mini" id="ntClock">--:--</div>
+  </div>
+</div>
+
+<!-- DEBUG PANEL -->
+<div id="debugPanel">
+  <div class="panel-header" onclick="toggleDebug()">
+    <span>⏱ TIME-SKIP DEBUG</span>
+    <span id="debugToggleIcon">▾</span>
+  </div>
+  <div class="panel-body">
+    <div class="row">
+      <label>Use simulated time</label>
+      <input type="checkbox" id="useSimTime" onchange="onSimToggle()">
+    </div>
+    <div id="simTimeDisplay">07:00</div>
+    <input type="range" id="simSlider" min="0" max="1439" value="420" oninput="onSimSlide()">
+    <div class="row">
+      <button onclick="jumpTo(7,0)">7AM</button>
+      <button onclick="jumpTo(10,0)">10AM</button>
+      <button onclick="jumpTo(12,0)">12PM</button>
+      <button onclick="jumpTo(16,0)">4PM</button>
+      <button onclick="jumpTo(18,0)">6PM</button>
+      <button onclick="jumpTo(21,0)">9PM</button>
+      <button onclick="jumpTo(0,30)">12:30AM</button>
+      <button onclick="jumpTo(3,0)">3AM</button>
+    </div>
+    <div class="row" style="font-size:10px;color:rgba(255,255,255,0.4)">
+      <span id="currentSlotLabel">—</span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════
+   CONFIG
+   No RSS. No proxy. No queue. Just direct embeds —
+   either a channel's live stream, or specific
+   uploaded videos you give me, slotted by time.
+════════════════════════════════════════════ */
+const OWM_KEY = "69d758106d8333cb8e806b8d3bff6d15";
+const LAT = 30.5083, LON = -97.6789;
+
+// Official 24/7 live news streams — these auto-update themselves on YouTube's end,
+// so there is nothing for you to maintain here.
+const LIVE_STREAMS = {
+  BBC:  "vtX1m5_wlzw",                 // BBC News Live (youtube.com/live/vtX1m5_wlzw)
+  FOX7: "live_stream?channel=UC5maSolHQX9er0BOxrzjMwA" // FOX 7 Austin channel live slot
+};
+
+// Music video pool for the music blocks
+const MUSIC_VIDEOS = [
+  "sOnqjkJTMaA", "Zi_XLOBDo_Y", "YNzuiRuQNYY", "PIb6AZdTr-A",
+  "t4QK8RxCAwo", "wp43OdtAAkM", "FTQbiNvZqaY", "SZQIfEN_p2A",
+  "m3-hY-hlhBg", "xMaE6toi4mk"
+];
+
+// Ads / filler video
+const FILLER_AD_ID = "pQ2jtyVKWhc";
+
+/* ════════════════════════════════════════════
+   YOUR SPECIFIC NEWSCAST VIDEOS
+   Paste exact video IDs here, mapped to the hour
+   they aired/should air. "today" plays today,
+   "tomorrow" auto-plays the next day at the same
+   time — so you only have to enter each video once
+   and it correctly repeats one day later.
+   Format: hour (0-23) -> YouTube video ID
+════════════════════════════════════════════ */
+const SCHEDULED_VIDEOS = {
+  // Hour : videoId  (24-hour clock)
+  7:  "MnD9mEuStTg",
+  9:  "j6OEL_s-r0I",
+  18: "WZXDND7-V9E"
+  // Add more hours here as you give me more links, e.g.:
+  // 8:  "xxxxxxxxxxx",
+  // 19: "xxxxxxxxxxx",
+};
+
+/* ════════════════════════════════════════════
+   SCHEDULE DEFINITION
+════════════════════════════════════════════ */
+function M(h, m=0) { return h * 60 + m; }
+
+const SCHEDULE = [
+  { start: M(5),  end: M(7),  type: "bbc_live",        label: "BBC NATIONAL NEWS · LIVE" },
+  { start: M(7),  end: M(9),  type: "scheduled_or_fox", label: "MORNING NEWS" },
+  { start: M(9),  end: M(10), type: "scheduled_or_fox", label: "MORNING HIGHLIGHTS" },
+  { start: M(10), end: M(12), type: "bbc_live",        label: "BBC NATIONAL NEWS · LIVE" },
+  { start: M(12), end: M(16), type: "music",           label: "MUSIC VIDEOS" },
+  { start: M(16), end: M(18), type: "scheduled_or_fox", label: "EVENING PREVIEW · WEATHER & TRAFFIC" },
+  { start: M(18), end: M(19), type: "scheduled_or_fox", label: "KVUE EVENING NEWS" },
+  { start: M(19), end: M(20), type: "scheduled_or_fox", label: "EXTENDED COVERAGE" },
+  { start: M(20), end: M(21), type: "scheduled_or_fox", label: "NEWS RECAP" },
+  { start: M(21), end: M(22), type: "scheduled_or_fox", label: "LATE NEWS" },
+  { start: M(22), end: M(24), type: "music",           label: "MUSIC VIDEOS" },
+  { start: M(0),  end: M(2),  type: "overnight_calm",  label: "OVERNIGHT · WEATHER" },
+  { start: M(2),  end: M(3),  type: "overnight_calm",  label: "OVERNIGHT · WEATHER" },
+  { start: M(3),  end: M(5),  type: "offline",         label: "OFF AIR" },
+];
+
+function getSlot(minutes) {
+  for (const s of SCHEDULE) {
+    if (minutes >= s.start && minutes < s.end) return s;
+  }
+  return SCHEDULE[0];
+}
+
+/* ════════════════════════════════════════════
+   TIME ENGINE (real or simulated)
+════════════════════════════════════════════ */
+let useSimTime = false;
+let simMinutes = 420;
+
+function nowMinutes() {
+  if (useSimTime) return simMinutes;
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+function currentHour() {
+  return Math.floor(nowMinutes() / 60);
+}
+
+function fmtTime(mins) {
+  let h = Math.floor(mins / 60) % 24;
+  const m = mins % 60;
+  const ampm = h >= 12 ? "PM" : "AM";
+  let h12 = h % 12; if (h12 === 0) h12 = 12;
+  return `${h12}:${String(m).padStart(2,"0")} ${ampm}`;
+}
+
+/* ════════════════════════════════════════════
+   DEBUG PANEL
+════════════════════════════════════════════ */
+function toggleDebug() {
+  document.getElementById("debugPanel").classList.toggle("collapsed");
+}
+function onSimToggle() {
+  useSimTime = document.getElementById("useSimTime").checked;
+  evaluateSchedule(true);
+}
+function onSimSlide() {
+  simMinutes = parseInt(document.getElementById("simSlider").value, 10);
+  document.getElementById("simTimeDisplay").innerText = fmtTime(simMinutes);
+  if (useSimTime) evaluateSchedule(true);
+}
+function jumpTo(h, m) {
+  simMinutes = M(h, m);
+  document.getElementById("simSlider").value = simMinutes;
+  document.getElementById("simTimeDisplay").innerText = fmtTime(simMinutes);
+  document.getElementById("useSimTime").checked = true;
+  useSimTime = true;
+  evaluateSchedule(true);
+}
+
+/* ════════════════════════════════════════════
+   PLAYER CONTROL
+════════════════════════════════════════════ */
+const iframe = document.getElementById("playerFrame");
+
+function playYouTube(videoId, opts = {}) {
+  const params = new URLSearchParams({
+    autoplay: "1",
+    controls: opts.controls ?? "1",
+    modestbranding: "1",
+    rel: "0"
+  });
+  iframe.src = `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
+  iframe.style.display = "block";
+  document.getElementById("offlineScreen").style.display = "none";
+  document.getElementById("standbyScreen").style.display = "none";
+}
+
+// Embeds a channel's live stream directly — auto-resolves to whatever is
+// currently live on that channel, no video ID needed, self-updating forever.
+function playChannelLive(channelId, opts = {}) {
+  const params = new URLSearchParams({
+    autoplay: "1",
+    controls: opts.controls ?? "1",
+    modestbranding: "1"
+  });
+  iframe.src = `https://www.youtube.com/embed/live_stream?channel=${channelId}&${params.toString()}`;
+  iframe.style.display = "block";
+  document.getElementById("offlineScreen").style.display = "none";
+  document.getElementById("standbyScreen").style.display = "none";
+}
+
+function stopPlayer() {
+  iframe.src = "";
+  iframe.style.display = "none";
+}
+
+function showOffline() {
+  stopPlayer();
+  document.getElementById("offlineScreen").style.display = "flex";
+  document.getElementById("standbyScreen").style.display = "none";
+}
+
+function showStandby() {
+  stopPlayer();
+  document.getElementById("offlineScreen").style.display = "none";
+  document.getElementById("standbyScreen").style.display = "flex";
+}
+
+/* ════════════════════════════════════════════
+   MUSIC ROTATION
+════════════════════════════════════════════ */
+let musicIdx = Math.floor(Math.random() * MUSIC_VIDEOS.length);
+let musicTimer = null;
+function playNextMusic() {
+  musicIdx = (musicIdx + 1) % MUSIC_VIDEOS.length;
+  playYouTube(MUSIC_VIDEOS[musicIdx]);
+  musicTimer = setTimeout(() => {
+    if (currentSlotKey && currentSlotKey.includes("music")) playNextMusic();
+  }, 4.5 * 60 * 1000);
+}
+
+/* ════════════════════════════════════════════
+   CORE SCHEDULE EVALUATOR
+════════════════════════════════════════════ */
+const FOX7_CHANNEL_ID = "UC5maSolHQX9er0BOxrzjMwA";
+const BBC_LIVE_VIDEO_ID = "vtX1m5_wlzw";
+
+let currentSlotKey = null;
+
+function evaluateSchedule(force = false) {
+  const mins = nowMinutes();
+  const slot = getSlot(mins);
+  const slotKey = `${slot.start}-${slot.end}-${slot.type}-${currentHour()}`;
+
+  document.getElementById("ntClock").innerText = fmtTime(mins);
+  document.getElementById("currentSlotLabel").innerText = `Slot: ${slot.label}`;
+
+  if (slotKey === currentSlotKey && !force) return;
+  currentSlotKey = slotKey;
+  clearTimeout(musicTimer);
+
+  document.getElementById("ntSegment").innerText = slot.label;
+
+  switch (slot.type) {
+    case "offline":
+      document.getElementById("ntLogo").innerText = "OFF AIR";
+      showOffline();
+      break;
+
+    case "overnight_calm":
+      document.getElementById("ntLogo").innerText = "NEWSNET";
+      showStandby();
+      break;
+
+    case "music":
+      document.getElementById("ntLogo").innerText = "MUSIC";
+      playNextMusic();
+      break;
+
+    case "bbc_live":
+      document.getElementById("ntLogo").innerText = "BBC";
+      playYouTube(BBC_LIVE_VIDEO_ID);
+      break;
+
+    case "scheduled_or_fox":
+      // If you gave me a specific video for this exact hour, play it (works today AND tomorrow
+      // automatically since we key off hour-of-day, not a specific date).
+      // Otherwise fall back to FOX 7 Austin's live stream so the slot is never empty.
+      const hour = Math.floor(mins / 60);
+      if (SCHEDULED_VIDEOS[hour]) {
+        document.getElementById("ntLogo").innerText = "KVUE";
+        playYouTube(SCHEDULED_VIDEOS[hour]);
+      } else {
+        document.getElementById("ntLogo").innerText = "FOX7";
+        playChannelLive(FOX7_CHANNEL_ID);
+      }
+      break;
+
+    default:
+      playYouTube(FILLER_AD_ID, { controls: "0" });
+  }
+}
+
+/* ════════════════════════════════════════════
+   WEATHER (overnight standby)
+════════════════════════════════════════════ */
+async function loadWeatherInto(elId) {
+  try {
+    const res = await fetch(
+      `https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&units=imperial&appid=${OWM_KEY}`
+    );
+    const d = await res.json();
+    const el = document.getElementById(elId);
+    if (el) el.innerText = `${Math.round(d.main.temp)}°F · ${d.weather[0].main}`;
+  } catch (e) {
+    const el = document.getElementById(elId);
+    if (el) el.innerText = "Weather unavailable";
+  }
+}
+setInterval(() => loadWeatherInto("standbyWeather"), 15 * 60 * 1000);
+
+/* ════════════════════════════════════════════
+   OFFLINE STATIC ANIMATION
+════════════════════════════════════════════ */
+const ostaticCanvas = document.getElementById("offlineStatic");
+const octx = ostaticCanvas.getContext("2d");
+function resizeOstatic() { ostaticCanvas.width = innerWidth; ostaticCanvas.height = innerHeight; }
+window.addEventListener("resize", resizeOstatic);
+resizeOstatic();
+
+function drawOfflineStatic() {
+  if (document.getElementById("offlineScreen").style.display !== "flex") return;
+  const w = ostaticCanvas.width, h = ostaticCanvas.height;
+  const img = octx.createImageData(w, h);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = Math.random() > 0.5 ? 255 : 0;
+    img.data[i] = img.data[i+1] = img.data[i+2] = v;
+    img.data[i+3] = 255;
+  }
+  octx.putImageData(img, 0, 0);
+  requestAnimationFrame(drawOfflineStatic);
+}
+drawOfflineStatic();
+
+const obars = document.getElementById("offlineBars");
+["#c0c0c0","#c0c000","#00c0c0","#00c000","#c000c0","#c00000","#0000c0"].forEach(c => {
+  const d = document.createElement("div");
+  d.style.background = c;
+  obars.appendChild(d);
+});
+
+/* ════════════════════════════════════════════
+   CLOCK + INIT LOOP
+════════════════════════════════════════════ */
+function tickClock() {
+  const mins = nowMinutes();
+  document.getElementById("ntClock").innerText = fmtTime(mins);
+  document.getElementById("standbyTime").innerText = fmtTime(mins);
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+setInterval(() => evaluateSchedule(), 30 * 1000);
+loadWeatherInto("standbyWeather");
+evaluateSchedule(true);
+</script>
+</body>
+</html>
