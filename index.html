@@ -124,7 +124,7 @@
   #standbyScreen {
     display: none;
     position: absolute; inset: 0;
-    background: linear-gradient(160deg,#06090f,#0c1322);
+    background: radial-gradient(circle at top, #050608, #000000);
     align-items: center;
     justify-content: center;
     flex-direction: column;
@@ -135,7 +135,7 @@
   #standbyScreen .net-id {
     font-size: 16px;
     letter-spacing: 6px;
-    color: rgba(255,255,255,0.35);
+    color: rgba(255,255,255,0.3);
     margin-bottom: 6px;
   }
 
@@ -147,21 +147,60 @@
   #standbyScreen .weather-temp-big {
     font-size: 90px;
     font-weight: 700;
-    color: #fff;
+    color: #ddd;
     line-height: 1;
   }
 
   #standbyScreen .weather-desc-big {
     font-size: 26px;
-    color: #9fd8ff;
+    color: #6fa6c9;
     letter-spacing: 2px;
   }
 
   #standbyScreen .weather-details-big {
     font-size: 16px;
-    color: rgba(255,255,255,0.5);
+    color: rgba(255,255,255,0.4);
     letter-spacing: 1px;
     margin-top: 4px;
+  }
+
+  /* Daily forecast strip on the overnight weather screen */
+  #standbyForecast {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  #standbyForecast .fc-day {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 10px 16px;
+    text-align: center;
+    min-width: 70px;
+  }
+
+  #standbyForecast .fc-label {
+    font-size: 12px;
+    color: rgba(255,255,255,0.35);
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+
+  #standbyForecast .fc-emoji {
+    font-size: 22px;
+    margin: 2px 0;
+  }
+
+  #standbyForecast .fc-hi {
+    font-size: 15px;
+    color: rgba(255,255,255,0.7);
+    font-weight: 600;
+  }
+
+  #standbyForecast .fc-lo {
+    font-size: 12px;
+    color: rgba(255,255,255,0.35);
   }
 
   /* Corner clock shown only on the full weather screen */
@@ -170,7 +209,7 @@
     top: 18px; left: 22px;
     font-family: 'Share Tech Mono', monospace;
     font-size: 22px;
-    color: rgba(255,255,255,0.8);
+    color: rgba(255,255,255,0.65);
     letter-spacing: 1px;
   }
 
@@ -225,7 +264,7 @@
 
 <div id="screen">
 
-  <iframe id="playerFrame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+  <div id="playerFrame"></div>
 
   <div id="offlineScreen">
     <canvas id="offlineStatic"></canvas>
@@ -241,6 +280,7 @@
     <div class="weather-temp-big" id="standbyTemp">--°F</div>
     <div class="weather-desc-big" id="standbyDesc">LOADING</div>
     <div class="weather-details-big" id="standbyDetails">— · —</div>
+    <div id="standbyForecast"></div>
   </div>
 
   <div id="channelBug">NEWSNET 24</div>
@@ -449,40 +489,78 @@ function jumpTo(h, m) {
 }
 
 /* ════════════════════════════════════════════
+   YOUTUBE IFRAME API — lets us detect when a video
+   actually ENDS (for music) instead of guessing a timer.
+════════════════════════════════════════════ */
+let ytPlayer = null;
+let ytReady = false;
+let pendingPlay = null; // {videoId, opts} queued if API isn't ready yet
+let onMusicEndedCallback = null; // set while a music video is playing
+
+function loadYouTubeAPI() {
+  const tag = document.createElement('script');
+  tag.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(tag);
+}
+
+window.onYouTubeIframeAPIReady = function() {
+  ytPlayer = new YT.Player('playerFrame', {
+    height: '100%',
+    width: '100%',
+    playerVars: { autoplay: 1, controls: 1, modestbranding: 1, rel: 0 },
+    events: {
+      onReady: () => { ytReady = true; if (pendingPlay) { const p = pendingPlay; pendingPlay = null; playYouTube(p.videoId, p.opts); } },
+      onStateChange: onPlayerStateChange
+    }
+  });
+};
+
+function onPlayerStateChange(e) {
+  // 0 = ended
+  if (e.data === 0 && onMusicEndedCallback) {
+    const cb = onMusicEndedCallback;
+    onMusicEndedCallback = null;
+    cb();
+  }
+}
+
+/* ════════════════════════════════════════════
    PLAYER CONTROL
 ════════════════════════════════════════════ */
-const iframe = document.getElementById("playerFrame");
-
 function playYouTube(videoId, opts = {}) {
-  const params = new URLSearchParams({
-    autoplay: "1",
-    controls: opts.controls ?? "1",
-    modestbranding: "1",
-    rel: "0"
-  });
-  iframe.src = `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
-  iframe.style.display = "block";
   document.getElementById("offlineScreen").style.display = "none";
   document.getElementById("standbyScreen").style.display = "none";
+
+  if (!ytReady || !ytPlayer || !ytPlayer.loadVideoById) {
+    pendingPlay = { videoId, opts };
+    return;
+  }
+  ytPlayer.loadVideoById(videoId);
+  document.getElementById("playerFrame").style.display = "block";
 }
 
 // Embeds a channel's live stream directly — auto-resolves to whatever is
 // currently live on that channel, no video ID needed, self-updating forever.
 function playChannelLive(channelId, opts = {}) {
-  const params = new URLSearchParams({
-    autoplay: "1",
-    controls: opts.controls ?? "1",
-    modestbranding: "1"
-  });
-  iframe.src = `https://www.youtube.com/embed/live_stream?channel=${channelId}&${params.toString()}`;
-  iframe.style.display = "block";
   document.getElementById("offlineScreen").style.display = "none";
   document.getElementById("standbyScreen").style.display = "none";
+  if (!ytReady || !ytPlayer) {
+    pendingPlay = { liveChannelId: channelId, opts };
+    return;
+  }
+  ytPlayer.cueVideoById ? null : null; // no-op, live streams handled via loadPlaylist fallback below
+  // Live channel streams aren't loadable by ID directly through the JS API in all cases,
+  // so we fall back to swapping the underlying iframe src for this one case only.
+  const params = new URLSearchParams({ autoplay: "1", controls: opts.controls ?? "1", modestbranding: "1" });
+  document.getElementById("playerFrame").src = `https://www.youtube.com/embed/live_stream?channel=${channelId}&${params.toString()}`;
+  document.getElementById("playerFrame").style.display = "block";
 }
 
 function stopPlayer() {
-  iframe.src = "";
-  iframe.style.display = "none";
+  if (ytPlayer && ytPlayer.stopVideo) {
+    try { ytPlayer.stopVideo(); } catch(e) {}
+  }
+  document.getElementById("playerFrame").style.display = "none";
 }
 
 function showOffline() {
@@ -531,16 +609,18 @@ function runOvernightCycle() {
 }
 
 /* ════════════════════════════════════════════
-   MUSIC ROTATION
+   MUSIC ROTATION — advances only when the current
+   song actually ENDS, not on a guessed timer.
 ════════════════════════════════════════════ */
 let musicIdx = Math.floor(Math.random() * MUSIC_VIDEOS.length);
-let musicTimer = null;
+
 function playNextMusic() {
   musicIdx = (musicIdx + 1) % MUSIC_VIDEOS.length;
   playYouTube(MUSIC_VIDEOS[musicIdx]);
-  musicTimer = setTimeout(() => {
+  onMusicEndedCallback = () => {
+    // Only keep chaining if we're still actually in a music slot
     if (currentSlotKey && currentSlotKey.includes("music")) playNextMusic();
-  }, 4.5 * 60 * 1000);
+  };
 }
 
 /* ════════════════════════════════════════════
@@ -561,7 +641,7 @@ function evaluateSchedule(force = false) {
 
   if (slotKey === currentSlotKey && !force) return;
   currentSlotKey = slotKey;
-  clearTimeout(musicTimer);
+  onMusicEndedCallback = null; // stop any pending music chain when switching content types
   clearTimeout(overnightTimer);
 
   document.getElementById("ntSegment").innerText = slot.label;
@@ -621,15 +701,47 @@ function weatherEmojiFor(main) {
 
 async function loadOvernightWeather() {
   try {
-    const res = await fetch(
-      `https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&units=imperial&appid=${OWM_KEY}`
-    );
-    const d = await res.json();
+    const [curRes, fcRes] = await Promise.all([
+      fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&units=imperial&appid=${OWM_KEY}`),
+      fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&units=imperial&appid=${OWM_KEY}`)
+    ]);
+    const d  = await curRes.json();
+    const fc = await fcRes.json();
+
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerText = v; };
     set("standbyEmoji",  weatherEmojiFor(d.weather[0].main));
     set("standbyTemp",   `${Math.round(d.main.temp)}°F`);
     set("standbyDesc",   d.weather[0].main.toUpperCase());
     set("standbyDetails",`Feels ${Math.round(d.main.feels_like)}°F · Humidity ${d.main.humidity}% · Wind ${Math.round(d.wind.speed)} mph`);
+
+    // Build a simple 5-day forecast from the 3-hour-interval data
+    const days = {};
+    for (const item of fc.list) {
+      const dt = new Date(item.dt * 1000);
+      const key = dt.toDateString();
+      if (!days[key]) days[key] = { highs: [], lows: [], conditions: [] };
+      days[key].highs.push(item.main.temp_max);
+      days[key].lows.push(item.main.temp_min);
+      days[key].conditions.push(item.weather[0].main);
+    }
+    const dayKeys = Object.keys(days).slice(0, 5);
+    const strip = document.getElementById("standbyForecast");
+    if (strip) {
+      strip.innerHTML = dayKeys.map(k => {
+        const day = days[k];
+        const hi  = Math.round(Math.max(...day.highs));
+        const lo  = Math.round(Math.min(...day.lows));
+        const emoji = weatherEmojiFor(day.conditions[Math.floor(day.conditions.length / 2)]);
+        const label = new Date(k).toLocaleDateString("en-US", { weekday: "short" });
+        return `
+          <div class="fc-day">
+            <div class="fc-label">${label}</div>
+            <div class="fc-emoji">${emoji}</div>
+            <div class="fc-hi">${hi}°</div>
+            <div class="fc-lo">${lo}°</div>
+          </div>`;
+      }).join("");
+    }
   } catch (e) {
     const el = document.getElementById("standbyDesc");
     if (el) el.innerText = "WEATHER UNAVAILABLE";
@@ -681,6 +793,7 @@ tickClock();
 
 setInterval(() => evaluateSchedule(), 30 * 1000);
 loadOvernightWeather();
+loadYouTubeAPI();
 evaluateSchedule(true);
 </script>
 </body>
