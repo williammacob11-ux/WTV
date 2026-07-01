@@ -574,19 +574,31 @@ const LIVE_STREAMS = {
 
 // Music video pool for the music blocks
 const MUSIC_VIDEOS = [
-  "sOnqjkJTMaA", "Zi_XLOBDo_Y", "YNzuiRuQNYY", "PIb6AZdTr-A",
-  "t4QK8RxCAwo", "wp43OdtAAkM", "FTQbiNvZqaY", "SZQIfEN_p2A",
-  "m3-hY-hlhBg", "xMaE6toi4mk",
-  // Newly added songs
+  "sOnqjkJTMaA",  // Thriller — Michael Jackson
+  "Zi_XLOBDo_Y",  // Billie Jean — Michael Jackson
+  "YNzuiRuQNYY",  // Human Nature — Michael Jackson
+  "PIb6AZdTr-A",  // Girls Just Want to Have Fun — Cyndi Lauper
+  "t4QK8RxCAwo",  // More Than a Feeling — Boston
+  "wp43OdtAAkM",  // Running Up That Hill — Kate Bush
+  "FTQbiNvZqaY",  // Africa — Toto
+  "SZQIfEN_p2A",  // Book of Love — Peter Gabriel
+  "m3-hY-hlhBg",  // How Will I Know — Whitney Houston
+  "xMaE6toi4mk",  // Should I Stay or Should I Go — The Clash
   "Sd4SJVsTulc",  // Bad — Michael Jackson
   "h1elr5bmZC8",  // Chicago — Michael Jackson
   "XAi3VTSdTxU",  // Earth Song — Michael Jackson
   "Gw7gNf_9njs",  // Goodbye Earl — The Chicks
   "Qt2mbGP6vFI",  // Another Day in Paradise — Phil Collins
   "WrMGGouem3c",  // Suspicious Minds — Elvis Presley
-  "9jK-NcRmVcw"   // The Final Countdown — Europe
-  // "I Knew It" and "I Knew You" couldn't be verified as real MJ tracks —
-  // skipped rather than guess wrong. Tell me the artist and I'll add them.
+  "9jK-NcRmVcw",  // The Final Countdown — Europe
+  "hDU4GB1PTxc",  // I Knew It (I Knew You) — Taylor Swift
+  "qnkuBUAwfe0",  // One Last Breath — Creed
+  "psuRGfAaju4",  // Fireflies — Owl City
+  "cjVQ36NhbMk",  // How To Save A Life — The Fray
+  "y2bVIBwpCTA",  // I Want You Back — Jackson 5
+  "qM1YMeDsc-M",  // When Can I See You Again? — Owl City
+  "s1tAYmMjLdY",  // I Miss You — Blink-182
+  "1OxOHtD0RDw",  // I Just Wanna Shine — Fitz And The Tantrums
 ];
 
 // Ad pools — shuffled once per page load so the order isn't identical every time
@@ -751,10 +763,24 @@ window.onYouTubeIframeAPIReady = function() {
 
 function onPlayerStateChange(e) {
   // 0 = ended
-  if (e.data === 0 && onMusicEndedCallback) {
-    const cb = onMusicEndedCallback;
-    onMusicEndedCallback = null;
-    cb();
+  if (e.data === 0) {
+    // Always re-evaluate the schedule first when any video ends — this is what
+    // makes transitions (music→offline, music→news, etc.) happen at the right
+    // moment rather than waiting for the next 30s poll tick.
+    const slotNow = getSlot(nowMinutes());
+    const slotKeyNow = `${slotNow.start}-${slotNow.end}-${slotNow.type}-${currentHour()}`;
+    if (slotKeyNow !== currentSlotKey) {
+      // Slot has changed — force a full schedule re-evaluation instead of
+      // blindly firing the music callback into the wrong content type.
+      evaluateSchedule(true);
+      return;
+    }
+    // Still in the same slot — fire the queued callback (e.g. next music track)
+    if (onMusicEndedCallback) {
+      const cb = onMusicEndedCallback;
+      onMusicEndedCallback = null;
+      cb();
+    }
   }
 }
 
@@ -846,13 +872,14 @@ function runOvernightCycle() {
    MUSIC ROTATION — advances only when the current
    song actually ENDS, not on a guessed timer.
 ════════════════════════════════════════════ */
-let musicIdx = Math.floor(Math.random() * MUSIC_VIDEOS.length);
+// Shuffle the music list so every session plays in a different order
+const SHUFFLED_MUSIC = shuffleArray(MUSIC_VIDEOS);
+let musicIdx = -1; // starts at -1 so first call to playNextMusic picks index 0
 
 function playNextMusic() {
-  musicIdx = (musicIdx + 1) % MUSIC_VIDEOS.length;
-  playYouTube(MUSIC_VIDEOS[musicIdx]);
+  musicIdx = (musicIdx + 1) % SHUFFLED_MUSIC.length;
+  playYouTube(SHUFFLED_MUSIC[musicIdx]);
   onMusicEndedCallback = () => {
-    // Only keep chaining if we're still actually in a music slot
     if (currentSlotKey && currentSlotKey.includes("music")) playNextMusic();
   };
 }
